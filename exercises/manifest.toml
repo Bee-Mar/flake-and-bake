@@ -1,0 +1,278 @@
+# flake-and-bake exercise manifest.
+# Order here is the order exercises are served in.
+#
+# Fields:
+#   name      = "chapter/exercise" (path under exercises/, no .nix)
+#   mode      = "eval"  -> `nix eval --json` result compared against `expect` (JSON)
+#             | "build" -> `nix build` must succeed; optional `postCheck` shell
+#   expect    = expected JSON value (eval mode)
+#   postCheck = shell snippet run with $out set to the build output (build mode)
+#   hint      = shown by `bake hint`
+
+[[exercise]]
+name = "00_intro/00_hello"
+mode = "eval"
+expect = '"hello, nix"'
+hint = "Change the string literal, and don't forget to delete the I AM NOT DONE line."
+
+[[exercise]]
+name = "01_basics/01_strings"
+mode = "eval"
+expect = '{"greeting":"I am learning nix","concat":"flake-and-bake","answer":"the answer is 42"}'
+hint = "greeting: interpolate ${name}. concat: the right half starts with a dash. answer: ${toString 42}."
+
+[[exercise]]
+name = "01_basics/02_let"
+mode = "eval"
+expect = '30'
+hint = "c = a + b needs a `b` binding. b = 20; gives 30. Order of let bindings doesn't matter."
+
+[[exercise]]
+name = "01_basics/03_if"
+mode = "eval"
+expect = '"big"'
+hint = "Turn the number into a boolean: n > 5."
+
+[[exercise]]
+name = "01_basics/04_inherit"
+mode = "eval"
+expect = '{"version":"1.0","license":"mit","name":"bake"}'
+hint = "Inside the braces: `inherit version;` and `inherit (meta) license name;`"
+
+[[exercise]]
+name = "02_functions/01_lambda"
+mode = "eval"
+expect = '{"doubled":8,"combined":14}'
+hint = "double = x: x * 2. addThenDouble = a: b: double (a + b)."
+
+[[exercise]]
+name = "02_functions/02_attrset_args"
+mode = "eval"
+expect = '{"a":"bake-2.0","b":"oven-0.1"}'
+hint = "{ name, version ? \"0.1\" }: ..."
+
+[[exercise]]
+name = "02_functions/03_ellipsis_at"
+mode = "eval"
+expect = '"bake has 3 attrs"'
+hint = "args@{ name, ... }: then interpolate ${toString (builtins.length (builtins.attrNames args))}."
+
+[[exercise]]
+name = "02_functions/04_compose"
+mode = "eval"
+expect = '11'
+hint = "compose = f: g: x: f (g x);"
+
+[[exercise]]
+name = "03_attrsets/01_rec"
+mode = "eval"
+expect = '{"pname":"bake","version":"1.2","tarball":"bake-1.2.tar.gz"}'
+hint = "One keyword in front of the opening brace: rec { ... }"
+
+[[exercise]]
+name = "03_attrsets/02_merge"
+mode = "eval"
+expect = '{"winner":20,"shallow":{"port":8080}}'
+hint = "Right side wins, and // does NOT recurse — nested.cfg is wholesale replaced, so debug is gone."
+
+[[exercise]]
+name = "03_attrsets/03_mapattrs"
+mode = "eval"
+expect = '{"curl":"8.0-patched","git":"2.44-patched"}'
+hint = "builtins.mapAttrs (name: v: v + \"-patched\") versions"
+
+[[exercise]]
+name = "04_lists_and_lib/01_map_filter"
+mode = "eval"
+expect = '[4,16,36]'
+hint = "builtins.map (x: x * x) (builtins.filter isEven nums)"
+
+[[exercise]]
+name = "04_lists_and_lib/02_fold"
+mode = "eval"
+expect = '{"curl":"8.0","git":"2.44","jq":"1.7"}'
+hint = "builtins.foldl' (acc: x: acc // x) { } fragments"
+
+[[exercise]]
+name = "04_lists_and_lib/03_lib_helpers"
+mode = "eval"
+expect = '{"joined":"curl git jq","ports":{"http":"port-http","ssh":"port-ssh"},"maybe":""}'
+hint = "lib.concatStringsSep \" \" [...], lib.genAttrs [...] (n: \"port-${n}\"), and change true to false."
+
+[[exercise]]
+name = "05_derivations/01_runcommand"
+mode = "build"
+postCheck = 'grep -q "baked at 350 degrees" "$out/temperature"'
+hint = "mkdir -p $out, then echo the string > $out/temperature. Inside '' strings, $out is fine but shell vars like ${x} need escaping as ''${x}."
+
+[[exercise]]
+name = "05_derivations/02_mkderivation"
+mode = "build"
+postCheck = '[ "$("$out/bin/greet")" = "hello from the oven" ]'
+hint = "Add src = ./greet; and in installPhase: install -m755 greet $out/bin/greet"
+
+[[exercise]]
+name = "06_patches/01_write_a_patch"
+mode = "build"
+postCheck = 'grep -q "chocolate chip" "$out/recipe.txt" && ! grep -q blueberry "$out/recipe.txt"'
+hint = "diff -ru muffin.orig muffin > fix-flavor.patch, then make the header paths a/recipe.txt and b/recipe.txt (patch -p1 strips the first component)."
+
+[[exercise]]
+name = "06_patches/02_override_attrs"
+mode = "build"
+postCheck = 'grep -q overridden "$out/baked"'
+hint = "postInstall = (old.postInstall or \"\") + '' echo overridden > $out/baked '';"
+
+[[exercise]]
+name = "07_overlays/01_first_overlay"
+mode = "eval"
+expect = '"baked with an overlay"'
+hint = "hello = prev.hello.overrideAttrs (old: { meta = old.meta // { description = \"baked with an overlay\"; }; });"
+
+[[exercise]]
+name = "07_overlays/02_final_vs_prev"
+mode = "eval"
+expect = '"hello, then loudly, then proudly"'
+hint = "In overlayB, the value being DEFINED must come from prev.greeting, not final.greeting."
+
+[[exercise]]
+name = "08_flakes_and_toml/01_fromtoml"
+mode = "eval"
+expect = '350'
+hint = "let config = builtins.fromTOML (builtins.readFile ./config.toml); in config.oven.temperature"
+
+[[exercise]]
+name = "08_flakes_and_toml/02_toml_driven"
+mode = "eval"
+expect = '{"muffins":"12 fresh muffins","scones":"8 fresh scones"}'
+hint = "name = b.name; value = \"${toString b.count} fresh ${b.name}\";"
+
+# ── intermediate ─────────────────────────────────────────────
+
+[[exercise]]
+name = "09_laziness/01_lazy"
+mode = "eval"
+expect = '42'
+hint = "deepSeq forces EVERYTHING in attrs, including boom. Just select attrs.safe directly — laziness never touches boom."
+
+[[exercise]]
+name = "09_laziness/02_trace"
+mode = "eval"
+expect = '42'
+hint = "trace takes TWO args: builtins.trace \"msg\" (x * 2)."
+
+[[exercise]]
+name = "09_laziness/03_or_null"
+mode = "eval"
+expect = '{"port":8080,"hasDebug":false,"fallbackChain":"default"}'
+hint = "config.server.port or 80 / config.server ? debug / config.client.theme or \"default\" — one `or` covers the whole missing path."
+
+[[exercise]]
+name = "09_laziness/04_with_pitfall"
+mode = "eval"
+expect = '{"a":1,"b":30,"answerKey":"done"}'
+hint = "let/args ALWAYS beat with; inner with beats outer with. So a is the let-bound value and b comes from scope2."
+
+[[exercise]]
+name = "10_paths_and_contexts/01_paths"
+mode = "eval"
+expect = '{"pathType":"path","joined":"path","base":"data.txt"}'
+hint = "Remove the quotes around ./data.txt — quoted, it's just a string. The other two are already correct expressions... run them mentally."
+
+[[exercise]]
+name = "10_paths_and_contexts/02_path_into_build"
+mode = "build"
+postCheck = 'grep -q cardamom "$out"'
+hint = "cp ${./secret-ingredient.txt} $out — the interpolation stores the file and pastes its store path into the script."
+
+[[exercise]]
+name = "10_paths_and_contexts/03_string_context"
+mode = "build"
+postCheck = 'grep -q "Hello, world" "$out"'
+hint = "${pkgs.hello}/bin/hello > $out — the interpolation carries the dependency context."
+
+[[exercise]]
+name = "11_callpackage/01_functionargs"
+mode = "eval"
+expect = '{"args":{"stdenv":false,"fetchurl":false,"enableGui":true},"wantsStdenv":true}'
+hint = "args = builtins.functionArgs mkPackage; wantsStdenv = builtins.functionArgs mkPackage ? stdenv;"
+
+[[exercise]]
+name = "11_callpackage/02_mini_callpackage"
+mode = "eval"
+expect = '"flour + butter (fresh)"'
+hint = "f (builtins.intersectAttrs (builtins.functionArgs f) scope // extra)"
+
+[[exercise]]
+name = "11_callpackage/03_makeoverridable"
+mode = "eval"
+expect = '"HELLO, NIX"'
+hint = "quiet = lib.makeOverridable mkGreeting { name = \"nix\"; }; then return (quiet.override { loud = true; }).text"
+
+[[exercise]]
+name = "12_fixpoints/01_fix"
+mode = "eval"
+expect = '{"pname":"bake","version":"2.0","tarball":"bake-2.0.tar.gz"}'
+hint = "fix = f: let result = f result; in result;  — yes, really."
+
+[[exercise]]
+name = "12_fixpoints/02_extends"
+mode = "eval"
+expect = '{"pname":"bake","version":"3.0","tarball":"bake-3.0.tar.gz"}'
+hint = "extends = overlay: base: final: let prev = base final; in prev // overlay final prev;"
+
+[[exercise]]
+name = "13_debugging/01_read_the_error"
+mode = "eval"
+expect = '{"q1":"a","q2":"b","q3":"c"}'
+hint = "Paste each snippet into nix repl and read what happens. rec { a = 1; b = a; } is FINE — b only needs a. `...` swallows unexpected (even typo'd) args."
+
+# ── advanced ─────────────────────────────────────────────────
+
+[[exercise]]
+name = "14_modules/01_first_module"
+mode = "eval"
+expect = '"hello, modules"'
+hint = "The module system rejects settings for undeclared options — fix the greetng typo."
+
+[[exercise]]
+name = "14_modules/02_types"
+mode = "eval"
+expect = '{"port":8080,"flags":["--color","-v"]}'
+hint = "port: lib.types.int. extraFlags: lib.types.listOf lib.types.str — listOf is what makes two definitions concatenate."
+
+[[exercise]]
+name = "14_modules/03_mkif"
+mode = "eval"
+expect = '["oven","rolling-pin"]'
+hint = "config.packages = lib.mkIf config.bakery.enable [ ... ]; and set bakery.enable = true in the last module."
+
+[[exercise]]
+name = "14_modules/04_priorities"
+mode = "eval"
+expect = '425'
+hint = "temperature = lib.mkForce 425; in the user module."
+
+[[exercise]]
+name = "15_derivation_internals/01_raw_derivation"
+mode = "build"
+postCheck = 'grep -q primitive "$out"'
+hint = "builder = \"${pkgs.bash}/bin/bash\"; args = [ \"-c\" \"echo primitive > $out\" ]; — $out here is a Nix-side string the builder shell expands? No — keep it literal; the env var exists in the sandbox."
+
+[[exercise]]
+name = "15_derivation_internals/02_inputs_quiz"
+mode = "eval"
+expect = '{"cmake":"native","openssl":"build","pkgconfig":"native","zlib":"build"}'
+hint = "Tools you RUN → nativeBuildInputs. Libraries you LINK → buildInputs."
+
+[[exercise]]
+name = "16_auto_import/01_readdir"
+mode = "eval"
+expect = '{"alpha":{"cores":4},"beta":{"cores":8}}'
+hint = "lib.filterAttrs to keep .nix regular files, then lib.mapAttrs' with lib.nameValuePair (lib.removeSuffix \".nix\" name) (import (dir + \"/name\"))."
+
+[[exercise]]
+name = "17_capstone/01_toml_modules"
+mode = "eval"
+expect = '{"temperature":375,"mode":"convection","batchNames":["sourdough","focaccia"]}'
+hint = "mode: type = lib.types.enum [ \"convection\" \"conventional\" ]; default = \"convection\";  and the second module becomes { config = toml; }."

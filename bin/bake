@@ -1,0 +1,224 @@
+# bake — the flake-and-bake exercise runner.
+# Wrapped by writeShellApplication (set -euo pipefail; jq, entr, nix on PATH).
+
+find_root() {
+  local d="$PWD"
+  while [ "$d" != "/" ]; do
+    if [ -f "$d/exercises/manifest.toml" ]; then
+      echo "$d"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  echo "error: could not find exercises/manifest.toml above $PWD" >&2
+  exit 1
+}
+
+ROOT="$(find_root)"
+MANIFEST="$ROOT/exercises/manifest.toml"
+SENTINEL="I AM NOT DONE"
+
+# Manifest (TOML) -> JSON, parsed by Nix itself. Cached per invocation.
+manifest_json() {
+  if [ -z "${_MANIFEST_JSON:-}" ]; then
+    _MANIFEST_JSON="$(nix eval --impure --json --expr \
+      "builtins.fromTOML (builtins.readFile \"$MANIFEST\")")"
+  fi
+  echo "$_MANIFEST_JSON"
+}
+
+exercise_names() {
+  manifest_json | jq -r '.exercise[].name'
+}
+
+exercise_field() { # name field
+  manifest_json | jq -r --arg n "$1" --arg f "$2" \
+    '.exercise[] | select(.name == $n) | .[$f] // empty'
+}
+
+exercise_path() { # name -> absolute file path
+  echo "$ROOT/exercises/$1.nix"
+}
+
+harness_expr() { # name -> nix expression evaluating the exercise through the harness
+  echo "import \"$ROOT/lib/harness.nix\" { exercisePath = \"$(exercise_path "$1")\"; }"
+}
+
+has_sentinel() { # name
+  grep -q "$SENTINEL" "$(exercise_path "$1")"
+}
+
+# check_exercise name quiet -> 0 pass, 1 fail, 2 skipped (offline build)
+check_exercise() {
+  local name="$1" quiet="${2:-}" mode expect actual out post
+  local path
+  path="$(exercise_path "$name")"
+
+  if [ ! -f "$path" ]; then
+    [ -n "$quiet" ] || echo "error: no such exercise file: $path" >&2
+    return 1
+  fi
+  if has_sentinel "$name"; then
+    [ -n "$quiet" ] || echo "✗ $name — remove the '$SENTINEL' line when you're ready to be checked."
+    return 1
+  fi
+
+  mode="$(exercise_field "$name" mode)"
+  case "$mode" in
+    eval)
+      expect="$(exercise_field "$name" expect)"
+      # stderr goes to a file, not into $actual — builtins.trace prints there!
+      local errfile
+      errfile="$(mktemp)"
+      if ! actual="$(nix eval --impure --json --expr "$(harness_expr "$name")" 2>"$errfile")"; then
+        [ -n "$quiet" ] || { echo "✗ $name — evaluation failed:"; sed 's/^/    /' "$errfile"; }
+        rm -f "$errfile"
+        return 1
+      fi
+      [ -n "$quiet" ] || grep '^trace:' "$errfile" || true
+      rm -f "$errfile"
+      if [ "$(echo "$actual" | jq -S .)" = "$(echo "$expect" | jq -S .)" ]; then
+        [ -n "$quiet" ] || echo "✓ $name"
+        return 0
+      else
+        if [ -z "$quiet" ]; then
+          echo "✗ $name — wrong result."
+          echo "  expected: $(echo "$expect" | jq -cS .)"
+          echo "  got:      $(echo "$actual" | jq -cS .)"
+        fi
+        return 1
+      fi
+      ;;
+    build)
+      if [ -n "${BAKE_OFFLINE:-}" ]; then
+        [ -n "$quiet" ] || echo "- $name (build exercise, skipped: offline)"
+        return 2
+      fi
+      if ! out="$(nix build --impure --no-link --print-out-paths --expr "$(harness_expr "$name")" 2>&1)"; then
+        [ -n "$quiet" ] || { echo "✗ $name — build failed:"; echo "$out" | tail -n 20 | sed 's/^/    /'; }
+        return 1
+      fi
+      out="$(echo "$out" | tail -n 1)"
+      post="$(exercise_field "$name" postCheck)"
+      if [ -n "$post" ]; then
+        if ! (export out; eval "$post"); then
+          [ -n "$quiet" ] || echo "✗ $name — built, but the output isn't right yet (postCheck failed). Output: $out"
+          return 1
+        fi
+      fi
+      [ -n "$quiet" ] || echo "✓ $name (built $out)"
+      return 0
+      ;;
+    *)
+      echo "error: exercise '$name' has unknown mode '$mode' in manifest" >&2
+      return 1
+      ;;
+  esac
+}
+
+first_incomplete() {
+  local n
+  for n in $(exercise_names); do
+    if ! check_exercise "$n" quiet >/dev/null 2>&1; then
+      echo "$n"
+      return 0
+    fi
+  done
+  return 1
+}
+
+show_exercise() { # name — print the instructions (leading comment block) of an exercise
+  local path
+  path="$(exercise_path "$1")"
+  echo
+  echo "════════════════════════════════════════════════════════"
+  echo " Exercise: $1"
+  echo " File:     ${path#"$ROOT"/}"
+  echo "════════════════════════════════════════════════════════"
+  sed -n '/^#/p; /^[^#]/q' "$path"
+  echo
+}
+
+cmd_list() {
+  local n status
+  for n in $(exercise_names); do
+    if has_sentinel "$n"; then
+      status="todo"
+    elif check_exercise "$n" quiet >/dev/null 2>&1; then
+      status="done"
+    else
+      status="in-progress"
+    fi
+    printf "%-12s %s\n" "[$status]" "$n"
+  done
+}
+
+cmd_run_all() {
+  local n pass=0 fail=0 skip=0 rc
+  for n in $(exercise_names); do
+    rc=0
+    check_exercise "$n" || rc=$?
+    case "$rc" in
+      0) pass=$((pass + 1)) ;;
+      2) skip=$((skip + 1)) ;;
+      *) fail=$((fail + 1)) ;;
+    esac
+  done
+  echo
+  echo "── $pass passed, $fail remaining$([ "$skip" -gt 0 ] && echo ", $skip skipped (offline)") ──"
+  [ "$fail" -eq 0 ]
+}
+
+cmd_watch() {
+  local current
+  while true; do
+    if ! current="$(first_incomplete)"; then
+      echo "🎉 All exercises complete! You baked the whole flake."
+      exit 0
+    fi
+    show_exercise "$current"
+    check_exercise "$current" || true
+    echo
+    echo "Edit ${current}.nix — checking again on save (ctrl-c to quit)…"
+    # Re-run when the exercise file changes; -d also catches new files (patches!)
+    find "$(dirname "$(exercise_path "$current")")" "$MANIFEST" -type f 2>/dev/null \
+      | entr -d -p true 2>/dev/null || sleep 1
+    clear || true
+  done
+}
+
+usage() {
+  cat <<'EOF'
+bake — flake-and-bake exercise runner
+
+  bake [watch]        work through exercises interactively (default)
+  bake check [name]   check one exercise (default: first incomplete)
+  bake run all        check every exercise, show progress
+  bake hint [name]    show the hint for an exercise
+  bake list           list exercises and their status
+  bake help           this message
+
+Exercise names look like: 01_basics/02_strings
+EOF
+}
+
+case "${1:-watch}" in
+  watch) cmd_watch ;;
+  check)
+    name="${2:-$(first_incomplete || true)}"
+    if [ -z "$name" ]; then echo "🎉 All exercises complete!"; exit 0; fi
+    show_exercise "$name"
+    check_exercise "$name"
+    ;;
+  run) cmd_run_all ;;
+  hint)
+    name="${2:-$(first_incomplete || true)}"
+    if [ -z "$name" ]; then echo "All done — no hints needed!"; exit 0; fi
+    hint="$(exercise_field "$name" hint)"
+    echo "Hint for $name:"
+    echo "${hint:-(no hint for this one — you got this)}" | sed 's/^/  /'
+    ;;
+  list) cmd_list ;;
+  help|-h|--help) usage ;;
+  *) echo "unknown command: $1" >&2; usage; exit 1 ;;
+esac

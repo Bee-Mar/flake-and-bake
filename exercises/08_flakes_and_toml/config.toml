@@ -1,0 +1,11 @@
+[oven]
+temperature = 350
+mode = "convection"
+
+[[batch]]
+name = "muffins"
+count = 12
+
+[[batch]]
+name = "scones"
+count = 8
