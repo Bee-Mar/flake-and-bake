@@ -45,7 +45,8 @@ harness_expr() { # name -> nix expression evaluating the exercise through the ha
 }
 
 has_sentinel() { # name
-  grep -q "$SENTINEL" "$(exercise_path "$1")"
+  # Match only the standalone marker line, not prose that merely mentions it
+  grep -q "^# $SENTINEL" "$(exercise_path "$1")"
 }
 
 # check_exercise name quiet -> 0 pass, 1 fail, 2 skipped (offline build)
@@ -180,9 +181,10 @@ cmd_watch() {
     check_exercise "$current" || true
     echo
     echo "Edit ${current}.nix — checking again on save (ctrl-c to quit)…"
-    # Re-run when the exercise file changes; -d also catches new files (patches!)
+    # Block until a file changes, then loop around and re-check.
+    # -z exits after the first event; -d also catches new files (patches!)
     find "$(dirname "$(exercise_path "$current")")" "$MANIFEST" -type f 2>/dev/null \
-      | entr -d -p true 2>/dev/null || sleep 1
+      | entr -n -z -d -p true 2>/dev/null || sleep 1
     clear || true
   done
 }
