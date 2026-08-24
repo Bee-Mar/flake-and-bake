@@ -24,7 +24,7 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = [
-            self.packages.${pkgs.system}.bake
+            self.packages.${pkgs.stdenv.hostPlatform.system}.bake
             pkgs.jq
             pkgs.entr
           ];
@@ -37,7 +37,7 @@
       checks = forAllSystems (pkgs: {
         progress = pkgs.runCommand "flake-and-bake-progress"
           {
-            nativeBuildInputs = [ self.packages.${pkgs.system}.bake ];
+            nativeBuildInputs = [ self.packages.${pkgs.stdenv.hostPlatform.system}.bake ];
             src = ./.;
           } ''
           # Sandboxed check: only verifies eval-mode exercises are solvable offline
